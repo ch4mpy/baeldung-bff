@@ -1,0 +1,146 @@
+# Custom properties to ease configuration overrides
+# on command-line or IDE launch configurations
+scheme: https
+hostname: localhost
+reverse-proxy-port: 7080
+angular-port: 4201
+angular-prefix: /angular-ui
+angular-uri: ${scheme}://${hostname}:${angular-port}${angular-prefix}
+vue-port: 4202
+vue-prefix: /angular-ui
+vue-uri: ${scheme}://${hostname}:${vue-port}${vue-prefix}
+react-port: 4203
+react-prefix: /angular-ui
+react-uri: ${scheme}://${hostname}:${react-port}${react-prefix}
+authorization-server-port: 8443
+authorization-server-prefix: /auth
+authorization-server-uri: https://${hostname}:${authorization-server-port}${authorization-server-prefix}
+bff-port: 7081
+bff-prefix: /bff
+bff-uri: ${scheme}://${hostname}:${bff-port}${bff-prefix}
+
+server:
+  port: ${reverse-proxy-port}
+  ssl:
+    enabled: true
+
+spring:
+  cloud:
+    gateway:
+      default-filters:
+      - DedupeResponseHeader=Access-Control-Allow-Credentials Access-Control-Allow-Origin
+      routes:
+      # SPAs assets
+      - id: angular-ui
+        uri: ${angular-uri}
+        predicates:
+        - Path=${angular-prefix}/**
+      - id: vue-ui
+        uri: ${vue-uri}
+        predicates:
+        - Path=${vue-prefix}/**
+      - id: react-ui
+        uri: ${react-uri}
+        predicates:
+        - Path=${react-prefix}/**
+      
+      # Authorization-server
+      - id: authorization-server
+        uri: ${authorization-server-uri}
+        predicates:
+        - Path=${authorization-server-prefix}/**
+      
+      # Proxy BFF
+      - id: bff
+        uri: ${bff-uri}
+        predicates:
+        - Path=${bff-prefix}/**,/login/**,/oauth2/**,/logout,/login-options
+
+management:
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  endpoints:
+    web:
+      exposure:
+        include: '*'
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
+
+logging:
+  level:
+    root: INFO
+    org:
+      springframework:
+        boot: INFO
+        web: INFO
+    
+---
+spring:
+  config:
+    activate:
+      on-profile: no-ssl
+server:
+  ssl:
+    enabled: false
+scheme: http
+
+---
+spring:
+  config:
+    activate:
+      on-profile: cognito
+  cloud:
+    gateway:
+      routes:
+      # SPAs assets
+      - id: angular-ui
+        uri: ${angular-uri}
+        predicates:
+        - Path=${angular-prefix}/**
+      - id: vue-ui
+        uri: ${vue-uri}
+        predicates:
+        - Path=${vue-prefix}/**
+      - id: react-ui
+        uri: ${react-uri}
+        predicates:
+        - Path=${react-prefix}/**
+      # not routing to authorization server here
+      # Proxy BFF
+      - id: bff
+        uri: ${bff-uri}
+        predicates:
+        - Path=${bff-prefix}/**,/login/**,/oauth2/**,/logout,/login-options
+
+---
+spring:
+  config:
+    activate:
+      on-profile: auth0
+  cloud:
+    gateway:
+      routes:
+      # SPAs assets
+      - id: angular-ui
+        uri: ${angular-uri}
+        predicates:
+        - Path=${angular-prefix}/**
+      - id: vue-ui
+        uri: ${vue-uri}
+        predicates:
+        - Path=${vue-prefix}/**
+      - id: react-ui
+        uri: ${react-uri}
+        predicates:
+        - Path=${react-prefix}/**
+      # not routing to authorization server here
+      # Proxy BFF
+      - id: bff
+        uri: ${bff-uri}
+        predicates:
+        - Path=${bff-prefix}/**,/login/**,/oauth2/**,/logout,/login-options

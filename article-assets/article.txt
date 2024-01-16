@@ -1,0 +1,424 @@
+<h2>1. Overview</h2>
+In this tutorial we'll take a deeper dive into BFF for SPA with <em>spring-cloud-gateway</em> and <a href="https://github.com/ch4mpy/spring-addons"><em>spring-addons-starter-oidc</em></a>.
+
+<a href="https://github.com/spring-projects/spring-authorization-server/issues/297#issue-896744390">According to security experts</a>, we should not configure any more single-page (Angular, React, Vue, etc.) and mobile applications as "public" OAuth2 clients. Instead, <strong>we should authorize SPAs with sessions on a <em>Backend For Frontend</em> running on the server</strong>.
+
+The good news is that we'll have only simple modifications to do to existing SPAs to connect it to a BFF and no modification at all on resource servers (REST APIs authorized with <em>Bearer</em> access tokens).
+
+In this tutorial, we'll use:
+<ul>
+ 	<li><em>spring-cloud-gateway</em> configured as a "confidential" OAuth2 client with authorization-code flow and the <em>TokenRelay</em> filter to implement the <em>Backend For Frontend</em> pattern</li>
+ 	<li>a Spring Boot REST API configured as a stateless OAuth2 resource server</li>
+ 	<li>an OIDC authorization server</li>
+ 	<li>a reverse proxy to have the same origin for at least the SPA and the BFF</li>
+ 	<li><a href="https://github.com/ch4mpy/spring-addons"><em>spring-addons-starter-oidc</em></a>, an open-source Spring Boot starter, to further simplify OAuth2 configuration in Spring Boot applications</li>
+</ul>
+<h2>2. OAuth2 BFF Pattern</h2>
+The <em>Backend For Frontend</em> pattern is an architecture with a middleware between a frontend and REST APIs. When OAuth2 is involved, requests are authorized with:
+<ul>
+ 	<li>session cookie and CSRF protection between the frontend and the BFF</li>
+ 	<li>access token between the BFF and REST API (and between services on the backend)</li>
+</ul>
+Such a BFF is responsible for:
+<ul>
+ 	<li>driving the authorization-code flow using a "confidential" OAuth2 client</li>
+ 	<li>storing tokens in session</li>
+ 	<li>replacing session cookie with the access token in session before forwarding a request from the frontend to a resource server</li>
+</ul>
+This pattern is safer than configuring single-page and mobile applications as "public" OAuth2 clients because:
+<ul>
+ 	<li>the BFF running on a server we trust, we can provide it with a secret to call the authorization server token endpoint</li>
+ 	<li>for the same reason, we can set firewall rules to allow only requests from our backend to access the token endpoint</li>
+ 	<li>tokens are kept on the server (sessions). Usage of session cookie requires protection against CSRF, but cookies can be flagged with <em>HttpOnly</em>, <em>Secure</em> and <em>SameSite</em>, which is safer than exposing tokens to the code running on end-user devices.</li>
+</ul>
+As BFF, we'll use <em>spring-cloud-gateway</em> with:
+<ul>
+ 	<li><em>spring-boot-starter-oauth2-client</em> and <em>oauth2Login()</em> to handle authorization-code flow and store tokens in session</li>
+ 	<li>the <em>TokenRelay=</em> filter to replace session cookie with access token in session when forwarding requests from the frontend to a resource server</li>
+</ul>
+<h2>3. Architecture</h2>
+So far, we listed quite a few services: 3 single-page applications, a REST API, a BFF, an authorization server and a reverse proxy. Let's have a look at how it makes a coherent system.
+<h3>3.1. System Overview</h3>
+Here is a representation of services, ports and path-prefixes we'll use:
+
+<a href="https://drafts.baeldung.com/wp-content/uploads/2024/01/system-architecture.png"><img class="aligncenter size-full wp-image-188113" src="https://drafts.baeldung.com/wp-content/uploads/2024/01/system-architecture.png" alt="frontend is in contact with reverse-proxy only which, depending on path-prefix, routes requests to one of the service exposing SPAs assets, the BFF or the authorization server. Resource server is behind the BFF and accessed only through it." /></a>
+
+A few points to note from this schema are:
+<ul>
+ 	<li>from the end-user devices perspective, there is a single point of contact with the backend: the reverse proxy (two contact points if we serve the authorization server with an origin of its own)</li>
+ 	<li>we expose three different single-page applications to demo the integration with each of the major frameworks (Angular, React and Vue)</li>
+ 	<li>the reverse-proxy uses path prefix to route requests to the right service</li>
+</ul>
+Using path-prefix to make a distinction between SPAs is nice when working on a single dev machine, but when going to a production-like environment, we might switch to a reverse-proxy using (sub)domains for routing, or even use a distinct reverse-proxy for each SPA.
+<h3>3.2. Reverse Proxy</h3>
+Because the requests are authorized with session cookies between the frontend and the BFF, and because Spring session cookies are flagged with <em>SameSite=Lax</em>, <strong>we need the same origin for a SPA and its BFF</strong>. For that, we'll use a reverse proxy as single contact point for browsers. It will route requests to the right service using path-prefix.
+
+In the companion repo, we use a very basic <em>spring-cloud-gateway</em> instance with just some routing (no security, no fancy filters), but there are plenty of other options to achieve the same goal, some being more adapted to specific environments: nginx container in Docker, ingress on K8s, etc.
+<h3>3.3. Whether to Hide the Authorization Server Behind the Reverse Proxy</h3>
+Depending on what we want to achieve, we'll include the authorization server among the services hidden behind the reverse proxy, or serve it from an origin of its own.
+
+If the authorization server has the same authority as a SPA, it is easy to include the login forms into an iframe inside the web-app (<em>https://my-domain.net/appx</em> authenticates users on <em>https://my-domain.net/auth</em>).
+
+On the other hand, Single Sign On relies on cookies flagged with <em>SameOrigin.</em> As a consequence, for two SPAs to benefit from SSO it should not only authenticate users on the same authorization server, but also use the same authority for it (both <em>https://appx.net</em> and <em>https://appy.net</em> authenticate users on <em>https://sso.net</em>).
+
+One option to match both conditions is using URIs like <em>https://my-domain.net/appx</em> and <em>https://my-domain.net/appy</em> both authenticating users on <em>https://my-domain.net/auth</em>. This is the option we'll use when working with Keycloak, but <strong>sharing the same origin between the SPAs and the authorization server is not a requirement for the BFF pattern to work, only sharing the same origin between the SPAs and the BFF is</strong> (and this is what we'll do with Cognito and Auth0 profiles).
+<h3>3.4. SSL</h3>
+Many of the requests in our system will hold some sort of credentials (either session &amp; CSRF or access token). The cookies holding such values should be flagged with <em>Secure</em> (the browser would attach such cookies only to <em>https</em> requests). The same way, headers like <em>Authorization</em> and <em>X_XSRF_TOKEN</em> should be set only on <em>https</em> requests.
+
+For this reason, the companion repo contains profiles to run each service with a self-signed certificate on dev machines.
+
+Following <a href="https://github.com/ch4mpy/self-signed-certificate-generation">this Github repository</a> instructions, generating such a certificates and adding it to your JREs/JDKs <em>cacerts</em> files as well as OS root authorities is straight forward.
+
+In each of our Spring application.yml, we'll use the following:
+<pre><code class="language-yaml">scheme: https
+server:
+  ssl:
+    enabled: true
+---
+spring:
+  config:
+    activate:
+      on-profile: no-ssl
+server:
+  ssl:
+    enabled: false
+scheme: http</code></pre>
+This settings force SSL to be enabled in default profile, which requires the <em>SERVER_SSL_KEY_PASSWORD</em>, <em>SERVER_SSL_KEY_STORE_PASSWORD</em> and <em>SERVER_SSL_KEY_STORE</em> environment variables to be set, but you may use the <em>no-ssl</em> profile to disable SSL. All configuration values containing a URI pointing to one of the Spring applications will use this <em>${scheme}</em> we define here to adapt to SSL being enabled or not.
+<h3>3.5. Implementation</h3>
+Firstly, using our IDE or <a href="https://start.spring.io/">https://start.spring.io/</a>, we create a new Spring Boot project named <em>reverse-proxy</em> with <em>Reactive Gateway</em> as dependency.
+
+Then we rename <em>src/main/resources/application.properties</em> to <em>src/main/resources/application.yml.</em>
+
+In addition to the SSL configuration we already described, we need to define the routing properties for spring-cloud-gateway:
+<pre><code class="language-yaml"># Custom properties to ease configuration overrides
+# on command-line or IDE launch configurations
+scheme: https
+hostname: localhost
+reverse-proxy-port: 7080
+angular-port: 4201
+angular-prefix: /angular-ui
+angular-uri: ${scheme}://${hostname}:${angular-port}${angular-prefix}
+vue-port: 4202
+vue-prefix: /angular-ui
+vue-uri: ${scheme}://${hostname}:${vue-port}${vue-prefix}
+react-port: 4203
+react-prefix: /angular-ui
+react-uri: ${scheme}://${hostname}:${react-port}${react-prefix}
+authorization-server-port: 8443
+authorization-server-prefix: /auth
+authorization-server-uri: https://${hostname}:${authorization-server-port}${authorization-server-prefix}
+bff-port: 7081
+bff-prefix: /bff
+bff-uri: ${scheme}://${hostname}:${bff-port}${bff-prefix}
+
+server:
+  port: ${reverse-proxy-port}
+  ssl:
+    enabled: true
+
+spring:
+  cloud:
+    gateway:
+      default-filters:
+      - DedupeResponseHeader=Access-Control-Allow-Credentials Access-Control-Allow-Origin
+      routes:
+      # SPAs assets
+      - id: angular-ui
+        uri: ${angular-uri}
+        predicates:
+        - Path=${angular-prefix}/**
+      - id: vue-ui
+        uri: ${vue-uri}
+        predicates:
+        - Path=${vue-prefix}/**
+      - id: react-ui
+        uri: ${react-uri}
+        predicates:
+        - Path=${react-prefix}/**
+      
+      # Authorization-server
+      - id: authorization-server
+        uri: ${authorization-server-uri}
+        predicates:
+        - Path=${authorization-server-prefix}/**
+      
+      # Proxy BFF
+      - id: bff
+        uri: ${bff-uri}
+        predicates:
+        - Path=${bff-prefix}/**,/login/**,/oauth2/**,/logout,/login-options</code></pre>
+With this configuration added, we can start our reverse-proxy!
+<h2>4. Authorization Server</h2>
+In the companion project on Github the default profile is designed for Keycloak but, thanks to <em>spring-addons-starter-oidc</em>, switching to any other OpenID Provider is just a matter of editing <em>application-properties.yml.</em> The file provided in the companion project contains profiles to get started easily with Auth0, Okta and Amazon Cognito.
+<h3>4.1. Keycloak in Docker</h3>
+The companion repo contains a docker-compose.yaml. To use it, all we need to do is:
+<ul>
+ 	<li>copy the certificate and request key to the ssl folder next to the compose file and rename it respectively to <em>self_signed.crt</em> and <em>req_key.pem</em></li>
+ 	<li>create a <em>default.env copy </em>named <em>.env</em> and edit <em>KEYCLOAK_ADMIN_PASSWORD</em></li>
+ 	<li>run <em>docker compose up</em> from the directory containing the docker-compose file</li>
+</ul>
+<h3>4.2. Standalone Keycloak</h3>
+Firstly, we'd need to edit <em>keycloak.conf</em> to add something like the following:
+<pre><code class="language-properties">hostname-strict=false
+http-relative-path=/auth
+
+https-key-store-file=/path/to/self_signed.jks
+https-key-store-password=change-me
+https-port=8443</code></pre>
+Then we should start Keycloak and visit <a href="https://localhost:7080/auth/">https://localhost:7080/auth/</a> to set the admin password.
+<h3>4.3. Confidential Client with Authorization-Code</h3>
+Once Keycloak started, we can browse to <a href="https://localhost:7080/auth/admin/master/console/#/master/clients">https://localhost:7080/auth/admin/master/console/#/master/clients</a> to create a <em>baeldung-confidential</em> client.
+
+<a href="https://drafts.baeldung.com/wp-content/uploads/2024/01/keycloak-client-creation-1.png"><img class="aligncenter size-full wp-image-188115" src="https://drafts.baeldung.com/wp-content/uploads/2024/01/keycloak-client-creation-1.png" alt="Keycloak client creation step 2 of 3: client authentication turned on and only standard flow selected" /></a>
+<em>Client authentication</em> is turned on to specify we want a "confidential" client and only <em>Standard flow</em> is selected because we'll only use authorization-code
+<a href="https://drafts.baeldung.com/wp-content/uploads/2024/01/keycloak-client-creation-2.png"><img class="aligncenter size-full wp-image-188116" src="https://drafts.baeldung.com/wp-content/uploads/2024/01/keycloak-client-creation-2.png" alt="Keycloak client creation step 3 of 3: Valid redirect URIs set for each network interface with URIs like &quot;https://localhost:7080/login/oauth2/code/baeldung-confidential&quot;, &quot;https://127.0.0.1:7080/login/oauth2/code/baeldung-confidential&quot;, etc. Valid post logout URIs and web origins set with &quot;+&quot;" /></a>
+
+As <em>Valid redirect URIs</em>, <em>Valid post logout redirect URIs</em> and <em>Web origins, w</em>e should enter all the network interfaces of our reverse-proxy on our dev machine. As a minimum, we should have:
+<ul>
+ 	<li>https://localhost:7080/login/oauth2/code/baeldung</li>
+ 	<li>https://127.0.0.1:7080/login/oauth2/code/baeldung</li>
+</ul>
+<h3>4.4. Working With Other OpenID Providers</h3>
+Each OIDC providers having its own way to declare "confidential" OAuth2 clients, we should refer to the documentation of each for details, but all have similar configuration parameters.
+
+For instance, on Auth0 we'd create a new <em>Regular Web Application</em> to declare a "confidential" OAuth2 client and its <em>settings</em> tab expects the same values as those visible in the 2nd Keycloak screenshot from preceding section.
+<h2>5. BFF Implementation with <em>spring-cloud-gateway</em> and <em>spring-addons-starter-oidc</em></h2>
+Firstly, using our IDE or https://start.spring.io/, we create a new Spring Boot project named <em>bff</em> with <em>Reactive Gateway</em>  and <em>OAuth2 client</em> as dependencies.
+
+Then we rename <em>src/main/resources/application.properties</em> to <em>src/main/resources/application.yml</em>.
+
+Last, we'll add <a href="https://central.sonatype.com/artifact/com.c4-soft.springaddons/spring-addons-starter-oidc">spring-addons-starter-oidc</a> to our dependencies:
+<pre><code class="language-xml">&lt;dependency&gt;
+    &lt;groupId&gt;com.c4-soft.springaddons&lt;/groupId&gt;
+    &lt;artifactId&gt;spring-addons-starter-oidc&lt;/artifactId&gt;
+    &lt;version&gt;7.3.3&lt;/version&gt;
+&lt;/dependency&gt;</code></pre>
+<h3>5.1. Constants</h3>
+Let's start with a few constants that will help us in other sections and when needing to override some values on command line or IDE launch configuration:
+<pre><code class="language-yaml">scheme: https
+hostname: localhost
+reverse-proxy-port: 7080
+reverse-proxy-uri: ${scheme}://${hostname}:${reverse-proxy-port}
+authorization-server-prefix: /auth
+issuer: ${reverse-proxy-uri}${authorization-server-prefix}/realms/master
+client-id: baeldung-confidential
+client-secret: change-me
+authorities-json-path: $.realm_access.roles
+bff-port: 7081
+resource-server-port: 7084
+audience: </code></pre>
+Of course, we'll have to override the value of client-secret with, for instance, an environment variable, a command line argument or an IDE launch configuration.
+<h3>5.2. Server Properties</h3>
+Now come the usual server properties:
+<pre><code class="language-yaml">server:
+  port: ${bff-port}
+  ssl:
+    enabled: true</code></pre>
+<h3>5.3. <em>spring-cloud-gateway</em> Routing</h3>
+As we have a single resource server behind the gateway, we need only one route definition:
+<pre><code class="language-yaml">spring:
+  cloud:
+    gateway:
+      routes:
+      - id: bff
+        uri: ${scheme}://${hostname}:${resource-server-port}
+        predicates:
+        - Path=/bff/v1/**
+        filters:
+        - DedupeResponseHeader=Access-Control-Allow-Credentials Access-Control-Allow-Origin
+        - TokenRelay=
+        - SaveSession
+        - StripPrefix=2</code></pre>
+The most important part are the <em>SaveSession</em> and <em>TokenRelay=</em> which form a corner-stone for the OAuth2 BFF pattern implementation: the first ensures that the session is persisted (with tokens) and the second replaces session cookie with access token in session when routing a request.
+
+The <em>StripPrefix=2</em> filter will remove <em>/bff/v1</em> prefix from the path when routing a request.
+<h3>5.4. Spring Security</h3>
+We can now get into configuring OAuth2 client security with the standard Boot properties:
+<pre><code class="language-yaml">spring:
+  security:
+    oauth2:
+      client:
+        provider:
+          baeldung:
+            issuer-uri: ${issuer}
+        registration:
+          baeldung:
+            provider: baeldung
+            authorization-grant-type: authorization_code
+            client-id: ${client-id}
+            client-secret: ${client-secret}
+            scope: openid,profile,email,offline_access</code></pre>
+Really nothing special here, just a very standard authorization-code registration with the required provider.
+<h3>5.5. spring-addons-starter-oidc</h3>
+To complete the configuration, let's tune the security with spring-addons-starter-oidc:
+<pre><code class="language-yaml">com:
+  c4-soft:
+    springaddons:
+      oidc:
+        ops:
+        - iss: ${issuer}
+          authorities:
+          - path: ${authorities-json-path}
+          aud: ${audience}
+        client:
+          client-uri: ${reverse-proxy-uri}
+          security-matchers:
+          - /bff/**
+          - /login/**
+          - /oauth2/**
+          - /logout
+          permit-all:
+          - /bff/**
+          - /login/**
+          - /oauth2/**
+          csrf: cookie-accessible-from-js
+          oauth2-redirections:
+            rp-initiated-logout: ACCEPTED
+        resourceserver:
+          permit-all:
+          - /error
+          - /login-options
+          - /v3/api-docs/**
+          - /swagger-ui/**
+          - /actuator/health/readiness
+          - /actuator/health/liveness</code></pre>
+We have here three main sections:
+<ul>
+ 	<li><em>ops</em>, with provider(s) specific values. This enables us to specify how to convert OpenID claims to Spring authorities. Defining an audience as done here is optional in most cases (it is not when working with Auth0)</li>
+ 	<li><em>client</em>, when provided with non-empty <em>security-matchers</em>, this section triggers the creation of a <em>SecurityFilterChain</em> bean with <em>oauth2Login</em>. Here, with <em>client-uri</em> property, we force the usage of the reverse-proxy URI as base for all redirections (instead of the BFF internal URI). Also, as we are using SPAs, we ask the BFF to expose CSRF token in a cookie accessible to Javascript. Last, to prevent cross-origin errors when using authorization servers with an authority of their own (this is the case with the <em>auth0</em> and <em>cognito</em> profiles), we ask that the RP-Initiated Logout response is returned with 201 status (instead of 3xx), which gives SPAs the ability to intercept this request and process it in a request with a new origin.</li>
+ 	<li><em>resourceserver</em>, this requests for a second <em>SecurityFilterChain</em> bean with <em>oauth2ResourceServer</em>. This filter-chain having an <em>@Order</em> with lowest precedence and no security-matcher, it will process all requests that weren't matched by other <em>SecurityFilterChain</em> beans. Here we use it for all resources for which a session is not desirable: REST and all public endpoints which aren't involved in login.</li>
+</ul>
+We can now run the BFF application
+<h3>5.6. <em>/login-options</em> Endpoint</h3>
+The BFF is the place where we defined login configuration: Spring OAuth2 client registration(s) with authorization-code. To avoid configuration duplication in each SPA (and possible inconsistencies), we'll host on the BFF a REST endpoint exposing the login option(s) from its configuration and where a user should be directed for login.
+
+For that, all we have to do is exposing a @RestController with a single endpoint returning a value built from configuration properties:
+<pre><code class="language-java">@RestController
+public class LoginOptionsController {
+    private final List&lt;LoginOptionDto&gt; loginOptions;
+
+    public LoginOptionsController(OAuth2ClientProperties clientProps, SpringAddonsOidcProperties addonsProperties) {
+        this.loginOptions = clientProps.getRegistration()
+            .entrySet()
+            .stream()
+            .filter(e -&gt; "authorization_code".equals(e.getValue()
+                .getAuthorizationGrantType()))
+            .map(e -&gt; new LoginOptionDto(e.getValue()
+                .getProvider(),
+                "%s/oauth2/authorization/%s".formatted(addonsProperties.getClient()
+                    .getClientUri(), e.getKey())))
+            .toList();
+    }
+
+    @GetMapping(path = "/login-options", produces = MediaType.APPLICATION_JSON_VALUE)
+    public Mono&lt;List&lt;LoginOptionDto&gt;&gt; getLoginOptions() throws URISyntaxException {
+        return Mono.just(this.loginOptions);
+    }
+
+    public static record LoginOptionDto(@NotEmpty String label, @NotEmpty String loginUri) {
+    }
+
+}</code></pre>
+<h2>6. Resource Server with <em>spring-addons-starter-oidc</em></h2>
+Our need for this system are very simple: a stateless REST API authorized with JWT access tokens, exposing a single endpoint to reflect the user-info contained in the token (or a payload with empty values if the request isn't authorized).
+
+For this, we'll create a new Spring Boot project named <em>resource-server</em> with Spring  <em>Web</em>  and <em>OAuth2 Resource Server</em> as dependencies.
+
+Then we rename <em>src/main/resources/application.properties</em> to <em>src/main/resources/application.yml</em>.
+
+Last, we'll add <a href="https://central.sonatype.com/artifact/com.c4-soft.springaddons/spring-addons-starter-oidc">spring-addons-starter-oidc</a> to our dependencies:
+<pre><code class="language-xml">&lt;dependency&gt;
+    &lt;groupId&gt;com.c4-soft.springaddons&lt;/groupId&gt;
+    &lt;artifactId&gt;spring-addons-starter-oidc&lt;/artifactId&gt;
+    &lt;version&gt;7.3.3&lt;/version&gt;
+&lt;/dependency&gt;</code></pre>
+<h3>6.1. Configuration</h3>
+Here are the properties we need for our resource server:
+<pre><code class="language-yaml">scheme: https
+hostname: localhost
+reverse-proxy-port: 7080
+reverse-proxy-uri: ${scheme}://${hostname}:${reverse-proxy-port}
+authorization-server-prefix: /auth
+issuer: ${reverse-proxy-uri}${authorization-server-prefix}/realms/master
+authorities-json-path: $.realm_access.roles
+resource-server-port: 7084
+audience: 
+
+server:
+  port: ${resource-server-port}
+  ssl:
+    enabled: true
+
+com:
+  c4-soft:
+    springaddons:
+      oidc:
+        ops:
+        - iss: ${issuer}
+          authorities:
+          - path: ${authorities-json-path}
+          aud: ${audience}
+        resourceserver:
+          permit-all:
+          - /me</code></pre>
+Thanks to spring-addons-starter-oidc, this is enough to declare a stateless resource server with:
+<ul>
+ 	<li>authorities mapping from a claim of our choice (<em>realm_access.roles</em> in the case of Keycloak with realm roles)</li>
+ 	<li>making <em>/me</em> accessible to anonymous requests</li>
+</ul>
+<h3>6.2. @RestController</h3>
+Let's implement a REST endpoint returning some data from the Authentication in the security-context (if any):
+<pre><code class="language-java">@RestController
+public class MeController {
+
+    @GetMapping("/me")
+    public UserInfoDto getMe(Authentication auth) {
+        if (auth instanceof JwtAuthenticationToken jwtAuth) {
+            return new UserInfoDto(auth.getName(), (String) jwtAuth.getTokenAttributes()
+                .getOrDefault(StandardClaimNames.EMAIL, ""), auth.getAuthorities()
+                    .stream()
+                    .map(GrantedAuthority::getAuthority)
+                    .toList());
+        }
+        return UserInfoDto.ANONYMOUS;
+
+    }
+
+    public static record UserInfoDto(String username, String email, List&lt;String&gt; roles) {
+        public static final UserInfoDto ANONYMOUS = new UserInfoDto("", "", List.of());
+    }
+}</code></pre>
+<h2>7. SPAs</h2>
+Because there are some slight differences between the framework used to create SPAs, we'll cover the three major ones: Angular, React and Vue.
+
+Creating SPAs is out of the scope of this article. Here after, we'll focus only on what it takes for a web application to login &amp; logout users on an OAuth2 BFF and query a REST API behind it. Please refer to the companion repo for complete implementations.
+
+For demonstration purposes, we'll provide with different login experiences, but in a real app, we'd probably retain only one:
+<ul>
+ 	<li>the user is redirected to the authorization server using the current browser tab (the SPA temporarily "exits")</li>
+ 	<li>a new window pops-up to display the authorization server forms (the SPA is still active in the background)</li>
+ 	<li>authorization server forms are displayed in an iframe inside the SPA, which requires SameOrigin for the SPA and the authorization server and, as so, works only with the default profile (Keycloak)</li>
+</ul>
+<h3>7.1. Angular</h3>
+&nbsp;
+
+&nbsp;
+<h3>7.2. Vue</h3>
+<h3>7.3. React</h3>
+<h2>8. Conclusion</h2>
+In this tutorial, with saw how to implement a BFF for SPA with spring-cloud-gateway and spring-addons-starter-oidc.
+
+We also saw why this solution should be prefered over configuring SPAs as public OAuth2 client, that it has very little impact on the SPA itself and changes nothing at all on resource servers.
+
+Last, we started to explore how convenient spring-addons-starter-oidc can be to configure, with just properties, what usually requires quite some Java configuration:
+<ul>
+ 	<li>map authorities from any claim(s) (and add prefix or force upper / lower case)</li>
+ 	<li>change OAuth2 redirect URIs to point to a reverse-proxy instead of the internal OAuth2 client</li>
+ 	<li>accept more than one  issuer on resource servers</li>
+ 	<li>give SPAs the opportunity to set the final redirect URI when initiating <em>oauth2Login</em> or <em>RP Initiated Logout</em> (set the route where the user is redirected after login / logout)</li>
+ 	<li>adapt to not exactly standard <em>RP Initiated Logout</em> (Auth0 and Cognito use non standard parameters and endpoints)</li>
+ 	<li>add optional parameters to authorization request (Auth0 <em>aud</em> or whatever)</li>
+ 	<li>change the HTTP status of authorization-code responses so that SPA can choose how to follow to <em>Location</em> header</li>
+ 	<li>define which endpoints are accessible to anonymous</li>
+</ul>
+As usual, all the code implementations are available over on GitHub.
