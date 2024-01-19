@@ -22,9 +22,9 @@ export const routes: Routes = [
 ## Serve Configuration with SSL
 Edit `angular.json` to:
 - add `"baseHref": "/angular-ui/"` to `projects.angular-ui.architect.build.options`
-- add in `projects.angular-ui.architect.serve.configurations` something like:
+- edit `projects.angular-ui.architect.serve.configurations.local` with the path to your own certificate files:
 ```json
-            "jw": {
+            "local": {
               "buildTarget": "angular-ui:build:development",
               "host": "0.0.0.0",
               "port": 4201,
@@ -36,4 +36,4 @@ Edit `angular.json` to:
 
 ## Development server
 
-Run `ng serve -c jw` replacing `jw` with whatever the `serve` configuration entry is named
+Run `ng serve -c local`

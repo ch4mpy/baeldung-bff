@@ -3,17 +3,10 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "ng serve",
+      "name": "ng serve -c local",
       "type": "chrome",
       "request": "launch",
       "preLaunchTask": "npm: start",
-      "url": "http://localhost:4200/angular-ui/"
-    },
-    {
-      "name": "ng serve -c jw",
-      "type": "chrome",
-      "request": "launch",
-      "preLaunchTask": "npm: start-jw",
       "url": "https://localhost:7080/angular-ui/"
     },
     {

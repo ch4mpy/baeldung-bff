@@ -83,7 +83,9 @@ server:
   ssl:
     enabled: false
 scheme: http</code></pre>
-This settings force SSL to be enabled in default profile, which requires the <em>SERVER_SSL_KEY_PASSWORD</em>, <em>SERVER_SSL_KEY_STORE_PASSWORD</em> and <em>SERVER_SSL_KEY_STORE</em> environment variables to be set, but you may use the <em>no-ssl</em> profile to disable SSL. All configuration values containing a URI pointing to one of the Spring applications will use this <em>${scheme}</em> we define here to adapt to SSL being enabled or not.
+This settings force SSL to be enabled in default profile. This requires the <em>SERVER_SSL_KEY_PASSWORD</em>, <em>SERVER_SSL_KEY_STORE_PASSWORD</em> and <em>SERVER_SSL_KEY_STORE</em> environment variables to be set, but you may use the <em>no-ssl</em> profile to disable SSL.
+
+All configuration values containing a URI pointing to one of the Spring applications will use this <em>${scheme}</em> we define here to adapt to SSL being enabled or not.
 <h3>3.5. Implementation</h3>
 Firstly, using our IDE or <a href="https://start.spring.io/">https://start.spring.io/</a>, we create a new Spring Boot project named <em>reverse-proxy</em> with <em>Reactive Gateway</em> as dependency.
 
@@ -181,13 +183,13 @@ As <em>Valid redirect URIs</em>, <em>Valid post logout redirect URIs</em> and <e
 <h3>4.4. Working With Other OpenID Providers</h3>
 Each OIDC providers having its own way to declare "confidential" OAuth2 clients, we should refer to the documentation of each for details, but all have similar configuration parameters.
 
-For instance, on Auth0 we'd create a new <em>Regular Web Application</em> to declare a "confidential" OAuth2 client and its <em>settings</em> tab expects the same values as those visible in the 2nd Keycloak screenshot from preceding section.
+For instance, on Auth0 we'd create a new <em>Regular Web Application</em> named <em>baeldung-confidential</em>. Its <em>settings</em> tab would expect the same values as those visible in the 2nd Keycloak screenshot from preceding section. We'd also create an API with <em>bff.baeldung.com</em> as identifier and with <em>baeldung-confidential</em> enabled in <em>Machine To Machine Applications</em> tab.
 <h2>5. BFF Implementation with <em>spring-cloud-gateway</em> and <em>spring-addons-starter-oidc</em></h2>
 Firstly, using our IDE or https://start.spring.io/, we create a new Spring Boot project named <em>bff</em> with <em>Reactive Gateway</em>  and <em>OAuth2 client</em> as dependencies.
 
 Then we rename <em>src/main/resources/application.properties</em> to <em>src/main/resources/application.yml</em>.
 
-Last, we'll add <a href="https://central.sonatype.com/artifact/com.c4-soft.springaddons/spring-addons-starter-oidc">spring-addons-starter-oidc</a> to our dependencies:
+Last, we'll add <em><a href="https://central.sonatype.com/artifact/com.c4-soft.springaddons/spring-addons-starter-oidc">spring-addons-starter-oidc</a></em> to our dependencies:
 <pre><code class="language-xml">&lt;dependency&gt;
     &lt;groupId&gt;com.c4-soft.springaddons&lt;/groupId&gt;
     &lt;artifactId&gt;spring-addons-starter-oidc&lt;/artifactId&gt;
@@ -249,8 +251,8 @@ We can now get into configuring OAuth2 client security with the standard Boot pr
             client-secret: ${client-secret}
             scope: openid,profile,email,offline_access</code></pre>
 Really nothing special here, just a very standard authorization-code registration with the required provider.
-<h3>5.5. spring-addons-starter-oidc</h3>
-To complete the configuration, let's tune the security with spring-addons-starter-oidc:
+<h3>5.5. <em>spring-addons-starter-oidc</em></h3>
+To complete the configuration, let's tune the security with <em>spring-addons-starter-oidc</em>:
 <pre><code class="language-yaml">com:
   c4-soft:
     springaddons:
@@ -319,6 +321,57 @@ public class LoginOptionsController {
     }
 
 }</code></pre>
+<h3>5.7. Cloud OpenID Providers</h3>
+RP-Initiated Logout is part of OpenID standard, but some providers do not implement it strictly. This is the case of Auth0 and Amazon Cognito for instance which do not provide an <em>end_session</em> endpoint in their OpenID configuration. Also, it may use non standard query parameters for logout.
+
+<em>spring-addons-starter-oidc</em> supports such logout endpoints "almost" complying with the standard and the BFF configuration in the companion project contains profiles with the required configuration:
+<pre><code class="language-yaml">---
+spring:
+  config:
+    activate:
+      on-profile: cognito
+issuer: https://cognito-idp.us-west-2.amazonaws.com/us-west-2_RzhmgLwjl
+client-id: 12olioff63qklfe9nio746es9f
+client-secret: change-me
+username-claim-json-path: username
+authorities-json-path: $.cognito:groups
+com:
+  c4-soft:
+    springaddons:
+      oidc:
+        client:
+          oauth2-logout:
+            baeldung:
+              uri: https://spring-addons.auth.us-west-2.amazoncognito.com/logout
+              client-id-request-param: client_id
+              post-logout-uri-request-param: logout_uri
+
+---
+spring:
+  config:
+    activate:
+      on-profile: auth0
+issuer: https://dev-ch4mpy.eu.auth0.com/
+client-id: yWgZDRJLAksXta8BoudYfkF5kus2zv2Q
+client-secret: change-me
+username-claim-json-path: $['https://c4-soft.com/user']['name']
+authorities-json-path: $['https://c4-soft.com/user']['roles']
+audience: bff.baeldung.com
+com:
+  c4-soft:
+    springaddons:
+      oidc:
+        client:
+          authorization-request-params:
+            baeldung:
+            - name: audience
+              value: ${audience}
+          oauth2-logout:
+            baeldung:
+              uri: ${issuer}v2/logout
+              client-id-request-param: client_id
+              post-logout-uri-request-param: returnTo</code></pre>
+In addition to the required properties overrides, we can note the specification for an additional request parameter when we send an authorization request to Auth0: <em>audience</em>.
 <h2>6. Resource Server with <em>spring-addons-starter-oidc</em></h2>
 Our need for this system are very simple: a stateless REST API authorized with JWT access tokens, exposing a single endpoint to reflect the user-info contained in the token (or a payload with empty values if the request isn't authorized).
 
@@ -326,7 +379,7 @@ For this, we'll create a new Spring Boot project named <em>resource-server</em> 
 
 Then we rename <em>src/main/resources/application.properties</em> to <em>src/main/resources/application.yml</em>.
 
-Last, we'll add <a href="https://central.sonatype.com/artifact/com.c4-soft.springaddons/spring-addons-starter-oidc">spring-addons-starter-oidc</a> to our dependencies:
+Last, we'll add <em><a href="https://central.sonatype.com/artifact/com.c4-soft.springaddons/spring-addons-starter-oidc">spring-addons-starter-oidc</a></em> to our dependencies:
 <pre><code class="language-xml">&lt;dependency&gt;
     &lt;groupId&gt;com.c4-soft.springaddons&lt;/groupId&gt;
     &lt;artifactId&gt;spring-addons-starter-oidc&lt;/artifactId&gt;
@@ -340,6 +393,7 @@ reverse-proxy-port: 7080
 reverse-proxy-uri: ${scheme}://${hostname}:${reverse-proxy-port}
 authorization-server-prefix: /auth
 issuer: ${reverse-proxy-uri}${authorization-server-prefix}/realms/master
+username-claim-json-path: $.preferred_username
 authorities-json-path: $.realm_access.roles
 resource-server-port: 7084
 audience: 
@@ -355,13 +409,14 @@ com:
       oidc:
         ops:
         - iss: ${issuer}
+          username-claim: ${username-claim-json-path}
           authorities:
           - path: ${authorities-json-path}
           aud: ${audience}
         resourceserver:
           permit-all:
           - /me</code></pre>
-Thanks to spring-addons-starter-oidc, this is enough to declare a stateless resource server with:
+Thanks to <em>spring-addons-starter-oidc</em>, this is enough to declare a stateless resource server with:
 <ul>
  	<li>authorities mapping from a claim of our choice (<em>realm_access.roles</em> in the case of Keycloak with realm roles)</li>
  	<li>making <em>/me</em> accessible to anonymous requests</li>
@@ -374,50 +429,198 @@ public class MeController {
     @GetMapping("/me")
     public UserInfoDto getMe(Authentication auth) {
         if (auth instanceof JwtAuthenticationToken jwtAuth) {
-            return new UserInfoDto(auth.getName(), (String) jwtAuth.getTokenAttributes()
-                .getOrDefault(StandardClaimNames.EMAIL, ""), auth.getAuthorities()
-                    .stream()
-                    .map(GrantedAuthority::getAuthority)
-                    .toList());
+            final var email = (String) jwtAuth.getTokenAttributes()
+                .getOrDefault(StandardClaimNames.EMAIL, "");
+            final var roles = auth.getAuthorities()
+                .stream()
+                .map(GrantedAuthority::getAuthority)
+                .toList();
+            final var exp = Optional.ofNullable(jwtAuth.getTokenAttributes()
+                .get(JwtClaimNames.EXP)).map(expClaim -&gt; {
+                    if(expClaim instanceof Long lexp) {
+                        return lexp;
+                    }
+                    if(expClaim instanceof Instant iexp) {
+                        return iexp.getEpochSecond();
+                    }
+                    if(expClaim instanceof Date dexp) {
+                        return dexp.toInstant().getEpochSecond();
+                    }
+                    return Long.MAX_VALUE;
+                }).orElse(Long.MAX_VALUE);
+            return new UserInfoDto(auth.getName(), email, roles, exp);
         }
         return UserInfoDto.ANONYMOUS;
-
     }
 
-    public static record UserInfoDto(String username, String email, List&lt;String&gt; roles) {
-        public static final UserInfoDto ANONYMOUS = new UserInfoDto("", "", List.of());
+    /**
+     * @param username a unique identifier for the resource owner in the token (sub claim by default)
+     * @param email OpenID email claim
+     * @param roles Spring authorities resolved for the authentication in the security context
+     * @param exp seconds from 1970-01-01T00:00:00Z UTC until the specified UTC date/time when the access token expires
+     */
+    public static record UserInfoDto(String username, String email, List&lt;String&gt; roles, Long exp) {
+        public static final UserInfoDto ANONYMOUS = new UserInfoDto("", "", List.of(), Long.MAX_VALUE);
     }
 }</code></pre>
+<h3>6.3. Multi-Tenancy</h3>
+What if the frontends consuming our REST API do not all authorize their users on the same authorization server (or if they offer a choice of authorization servers)?
+
+With <em>spring-security-starter-oidc</em>, this is dead simple to solve: <em>com.c4-soft.springaddons.oidc.ops</em> configuration property is an array and we can add as many issuers as we trust, each with its own mapping for user name and authorities. A valid token issued by any of these issuers will be accepted by our resource server.
 <h2>7. SPAs</h2>
 Because there are some slight differences between the framework used to create SPAs, we'll cover the three major ones: Angular, React and Vue.
 
-Creating SPAs is out of the scope of this article. Here after, we'll focus only on what it takes for a web application to login &amp; logout users on an OAuth2 BFF and query a REST API behind it. Please refer to the companion repo for complete implementations.
+However, creating SPAs is out of the scope of this article. Here after, we'll focus only on what it takes for a web application to login &amp; logout users on an OAuth2 BFF and query a REST API behind it. Please refer to the companion repo for complete implementations.
 
-For demonstration purposes, we'll provide with different login experiences, but in a real app, we'd probably retain only one:
+For demonstration purposes, we'll provide with two different login experiences:
 <ul>
  	<li>the user is redirected to the authorization server using the current browser tab (the SPA temporarily "exits")</li>
- 	<li>a new window pops-up to display the authorization server forms (the SPA is still active in the background)</li>
- 	<li>authorization server forms are displayed in an iframe inside the SPA, which requires SameOrigin for the SPA and the authorization server and, as so, works only with the default profile (Keycloak)</li>
+ 	<li>authorization server forms are displayed in an iframe inside the SPA, which requires <em>SameOrigin</em> for the SPA and the authorization server and, as so, works only with the default profile (Keycloak)</li>
 </ul>
 <h3>7.1. Angular</h3>
-&nbsp;
+Let's first create user.service.ts, a regular Angular @Injectable responsible for maintaining data about current user:
+<pre><code class="language-typescript">@Injectable({
+  providedIn: 'root',
+})
+export class UserService {
+  private user$ = new BehaviorSubject&lt;User&gt;(User.ANONYMOUS);
+  private refreshSub?: Subscription;
 
-&nbsp;
+  constructor(private http: HttpClient) {
+    this.refresh();
+  }
+
+  refresh(): void {
+    this.refreshSub?.unsubscribe();
+    this.http.get('/bff/v1/me').subscribe({
+      next: (dto: any) =&gt; {
+        const user = dto as UserinfoDto;
+        this.user$.next(
+          user.username
+            ? new User(user.username || '', user.email || '', user.roles || [])
+            : User.ANONYMOUS
+        );
+        if (!!user.username) {
+          const now = Date.now();
+          const delay = (1000 * user.exp - now) * 0.8;
+          if (delay &gt; 2000) {
+            this.refreshSub = interval(delay).subscribe(() =&gt; this.refresh());
+          }
+        }
+      },
+      error: (error) =&gt; {
+        console.warn(error);
+        this.user$.next(User.ANONYMOUS);
+      },
+    });
+  }
+
+  async logout() {
+    lastValueFrom(
+      this.http.post('/logout', null, {
+        headers: {
+          'X-POST-LOGOUT-SUCCESS-URI': baseUri,
+        },
+        observe: 'response',
+      })
+    )
+      .then((resp) =&gt; {
+        const logoutUri = resp.headers.get('Location');
+        if (!!logoutUri) {
+          window.location.href = logoutUri;
+        }
+      })
+      .finally(() =&gt; {
+        this.user$.next(User.ANONYMOUS);
+      });
+  }
+
+  get loginOptions(): Observable&lt;Array&lt;LoginOptionDto&gt;&gt; {
+    return this.http
+      .get('/login-options')
+      .pipe(map((dto: any) =&gt; dto as LoginOptionDto[]));
+  }
+
+  get valueChanges(): Observable&lt;User&gt; {
+    return this.user$;
+  }
+
+  get current(): User {
+    return this.user$.value;
+  }
+}</code></pre>
+The <em>refresh()</em> method calls the REST API through the BFF to get some data about the current user. If the user has an active session on the BFF, the TokenRelay can do its job, the request to the resource server has a valid access token and the response contains things like username, granted authorities and access token expiration time. This last attribute gives us the opportunity to schedule another <em>refresh()</em> call just before the token expires, which will keep the session alive.
+
+Another point of interest is RP-Initiated Logout implementation:
+<ul>
+ 	<li>first, we send a <em>POST</em> request to the BFF, with a <em>X-POST-LOGOUT-SUCCESS-URI</em> header to instruct <em>spring-addons-starter-oidc</em> where to redirect the user after the authorization server responds (after next step)</li>
+ 	<li>as we configured the BFF to respond to logout with a <em>201</em> status (instead of <em>302</em>), our SPA can <em>observe</em> the response and follow to the <em>Location</em> header by setting <em>window.location.href</em>. This saves us from many CORS errors because the request to the authorization server will have an origin and a referer of it's own, as well as fresh headers.</li>
+</ul>
+The last important point is login, which happens in the <em>AuthenticationComponent</em>. Two methods are of special interest for us:
+<pre><code class="language-typescript">  login() {
+    if (!this.loginUri) {
+      return;
+    }
+
+    const url = new URL(this.loginUri);
+    url.searchParams.append(
+      'post_login_success_uri',
+      `${baseUri}${this.router.url}`
+    );
+    const loginUrl = url.toString();
+
+    if (this.selectedLoginExperience.value === LoginExperience.IFRAME) {
+      this.iframeSrc = this.sanitizer.bypassSecurityTrustResourceUrl(loginUrl);
+      this.isLoginModalDisplayed = true;
+    } else {
+      window.location.href = loginUrl;
+    }
+  }
+
+  iframeLoad(event: any) {
+    if (!!event.currentTarget.src) {
+      this.user.refresh();
+      this.isLoginModalDisplayed = !this.user.current.isAuthenticated;
+    }
+  }</code></pre>
+The login() method first adds a <em>post_login_success_uri</em> request parameter to instruct <em>spring-addons-starter-oidc</em> that the last redirect URI should point to the active route when it started.
+
+Then we either set the source of the iframe (and display it) or "exit" our SPA by replacing the current tab content with authorization server one.
+
+When using iframe, it reloads each time it receives one of the authorization-code flow redirection. The <em>iframeLoad()</em> method hooks into this <em>load</em> events to check if user status changed (and hide the iframe if user authenticated).
+
+<strong>Important note</strong>: to run the Angular app in the companion repo, in <em>angular.json</em>, edit the <em>local</em> serve configuration to point to your own self-signed certificate. Then run <em>ng serve -c local</em> and point your browser to <a href="https://localhost:7080/angular-ui/">https://localhost:7080/angular-ui/</a> (not https://localhost:4201/angular-ui/ which would skip the reverse-proxy).
 <h3>7.2. Vue</h3>
 <h3>7.3. React</h3>
+<h3>7.4. Multi-Tenancy</h3>
+In the companion project, there is a single OAuth2 client registration with authorization-code. But what if we had more?
+
+The user should be prompted to choose only between OPs he can actually authenticate on, and in many cases, we can filter the login-options.
+
+Here are a few samples of situations where we can drastically shrink the number of option, ideally to one:
+<ul>
+ 	<li>the SPA is configured with a specific option to use</li>
+ 	<li>there are several reverse-proxies and each can set something like a header with the option to use</li>
+ 	<li>some technical info, like the IP of the device the frontend runs on, can tell us that a user should be authorized here or there</li>
+</ul>
+In such situations, we have two choices:
+<ul>
+ 	<li>send filtering criteria with the request to <em>/login-options</em> and filter in the BFF controller to return only the relevant options</li>
+ 	<li>filter <em>/login-options</em> response inside the SPA</li>
+</ul>
 <h2>8. Conclusion</h2>
-In this tutorial, with saw how to implement a BFF for SPA with spring-cloud-gateway and spring-addons-starter-oidc.
+In this tutorial, with saw how to implement a BFF for SPA with spring-cloud-gateway and <em>spring-addons-starter-oidc</em>.
 
 We also saw why this solution should be prefered over configuring SPAs as public OAuth2 client, that it has very little impact on the SPA itself and changes nothing at all on resource servers.
 
-Last, we started to explore how convenient spring-addons-starter-oidc can be to configure, with just properties, what usually requires quite some Java configuration:
+Last, we started to explore how convenient <em>spring-addons-starter-oidc</em> can be to configure, with just properties, what usually requires quite some Java configuration:
 <ul>
  	<li>map authorities from any claim(s) (and add prefix or force upper / lower case)</li>
  	<li>change OAuth2 redirect URIs to point to a reverse-proxy instead of the internal OAuth2 client</li>
  	<li>accept more than one  issuer on resource servers</li>
- 	<li>give SPAs the opportunity to set the final redirect URI when initiating <em>oauth2Login</em> or <em>RP Initiated Logout</em> (set the route where the user is redirected after login / logout)</li>
- 	<li>adapt to not exactly standard <em>RP Initiated Logout</em> (Auth0 and Cognito use non standard parameters and endpoints)</li>
- 	<li>add optional parameters to authorization request (Auth0 <em>aud</em> or whatever)</li>
+ 	<li>give SPAs the opportunity to set the route where the user is redirected after login / logout</li>
+ 	<li>adapt to not exactly standard <em>RP-Initiated Logout</em> (for Auth0 and Amazon Cognito)</li>
+ 	<li>add optional parameters to authorization request (Auth0 <em>audience</em> or whatever)</li>
  	<li>change the HTTP status of authorization-code responses so that SPA can choose how to follow to <em>Location</em> header</li>
  	<li>define which endpoints are accessible to anonymous</li>
 </ul>

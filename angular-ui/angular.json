@@ -68,7 +68,7 @@
             "development": {
               "buildTarget": "angular-ui:build:development"
             },
-            "jw": {
+            "local": {
               "buildTarget": "angular-ui:build:development",
               "host": "0.0.0.0",
               "port": 4201,

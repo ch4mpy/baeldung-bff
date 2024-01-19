@@ -75,6 +75,10 @@
   "type": "java.lang.String",
   "description": "OAuth2 client-secret"
 },{
+  "name": "username-claim-json-path",
+  "type": "java.lang.String",
+  "description": "JSON path to the claim to use as user name"
+},{
   "name": "authorities-json-path",
   "type": "java.lang.String",
   "description": "JSON path to the claim to use as Spring authorities source"

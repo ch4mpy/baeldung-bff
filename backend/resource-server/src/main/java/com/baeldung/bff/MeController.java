@@ -41,7 +41,6 @@ public class MeController {
             return new UserInfoDto(auth.getName(), email, roles, exp);
         }
         return UserInfoDto.ANONYMOUS;
-
     }
 
     /**

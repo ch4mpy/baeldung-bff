@@ -13,6 +13,7 @@ import { baseUri } from './app.config';
 interface LoginOptionDto {
   label: string;
   loginUri: string;
+  isSameAuthority: boolean;
 }
 
 interface UserinfoDto {
@@ -56,19 +57,6 @@ export class UserService {
         this.user$.next(User.ANONYMOUS);
       },
     });
-  }
-
-  login(loginUri: string, postLoginRoute: string[]) {
-    const url = new URL(loginUri);
-    url.searchParams.append(
-      'post_login_success_uri',
-      `${baseUri}${postLoginRoute.join('/')}`
-    )
-    url.searchParams.append(
-      'machin',
-      'truc'
-    );
-    window.location.href = url.toString();
   }
 
   async logout() {

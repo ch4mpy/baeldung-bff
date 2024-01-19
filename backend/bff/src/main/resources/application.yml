@@ -8,6 +8,7 @@ authorization-server-prefix: /auth
 issuer: ${reverse-proxy-uri}${authorization-server-prefix}/realms/master
 client-id: baeldung-confidential
 client-secret: change-me
+username-claim-json-path: $.preferred_username
 authorities-json-path: $.realm_access.roles
 bff-port: 7081
 resource-server-port: 7084
@@ -118,6 +119,9 @@ spring:
     activate:
       on-profile: cognito
 issuer: https://cognito-idp.us-west-2.amazonaws.com/us-west-2_RzhmgLwjl
+client-id: 12olioff63qklfe9nio746es9f
+client-secret: change-me
+username-claim-json-path: username
 authorities-json-path: $.cognito:groups
 com:
   c4-soft:
@@ -136,6 +140,9 @@ spring:
     activate:
       on-profile: auth0
 issuer: https://dev-ch4mpy.eu.auth0.com/
+client-id: yWgZDRJLAksXta8BoudYfkF5kus2zv2Q
+client-secret: change-me
+username-claim-json-path: $['https://c4-soft.com/user']['name']
 authorities-json-path: $['https://c4-soft.com/user']['roles']
 audience: bff.baeldung.com
 com:
@@ -143,6 +150,10 @@ com:
     springaddons:
       oidc:
         client:
+          authorization-request-params:
+            baeldung:
+            - name: audience
+              value: ${audience}
           oauth2-logout:
             baeldung:
               uri: ${issuer}v2/logout
