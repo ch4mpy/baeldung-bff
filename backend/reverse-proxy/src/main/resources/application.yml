@@ -7,10 +7,10 @@ angular-port: 4201
 angular-prefix: /angular-ui
 angular-uri: ${scheme}://${hostname}:${angular-port}${angular-prefix}
 vue-port: 4202
-vue-prefix: /angular-ui
+vue-prefix: /vue-ui
 vue-uri: ${scheme}://${hostname}:${vue-port}${vue-prefix}
 react-port: 4203
-react-prefix: /angular-ui
+react-prefix: /react-ui
 react-uri: ${scheme}://${hostname}:${react-port}${react-prefix}
 authorization-server-port: 8443
 authorization-server-prefix: /auth
