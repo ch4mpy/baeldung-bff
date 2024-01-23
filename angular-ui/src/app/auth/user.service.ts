@@ -1,20 +1,6 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable } from '@angular/core';
-import {
-  BehaviorSubject,
-  Observable,
-  Subscription,
-  interval,
-  lastValueFrom,
-  map,
-} from 'rxjs';
-import { baseUri } from './app.config';
-
-interface LoginOptionDto {
-  label: string;
-  loginUri: string;
-  isSameAuthority: boolean;
-}
+import { BehaviorSubject, Observable, Subscription, interval } from 'rxjs';
 
 interface UserinfoDto {
   username: string;
@@ -57,32 +43,6 @@ export class UserService {
         this.user$.next(User.ANONYMOUS);
       },
     });
-  }
-
-  async logout() {
-    lastValueFrom(
-      this.http.post('/logout', null, {
-        headers: {
-          'X-POST-LOGOUT-SUCCESS-URI': baseUri,
-        },
-        observe: 'response',
-      })
-    )
-      .then((resp) => {
-        const logoutUri = resp.headers.get('Location');
-        if (!!logoutUri) {
-          window.location.href = logoutUri;
-        }
-      })
-      .finally(() => {
-        this.user$.next(User.ANONYMOUS);
-      });
-  }
-
-  get loginOptions(): Observable<Array<LoginOptionDto>> {
-    return this.http
-      .get('/login-options')
-      .pipe(map((dto: any) => dto as LoginOptionDto[]));
   }
 
   get valueChanges(): Observable<User> {

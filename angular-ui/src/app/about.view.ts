@@ -6,7 +6,7 @@ import { NavigationComponent } from './navigation.component';
   standalone: true,
   imports: [NavigationComponent],
   template: `<app-navigation
-      [destination]="['home']"
+      [destination]="['']"
       label="HOME"
     ></app-navigation>
     <p>

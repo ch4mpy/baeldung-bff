@@ -1,28 +1,41 @@
-import { CommonModule } from '@angular/common';
+import { HttpClient } from '@angular/common/http';
 import { Component } from '@angular/core';
 import { FormControl, ReactiveFormsModule, Validators } from '@angular/forms';
 import { DomSanitizer, SafeUrl } from '@angular/platform-browser';
-import { Router } from '@angular/router';
-import { baseUri, reverseProxyUri } from './app.config';
+import { Observable, map } from 'rxjs';
 import { UserService } from './user.service';
+import { baseUri } from '../app.config';
+import { Router } from '@angular/router';
+import { CommonModule } from '@angular/common';
 
 enum LoginExperience {
   IFRAME,
   DEFAULT,
 }
 
+interface LoginOptionDto {
+  label: string;
+  loginUri: string;
+  isSameAuthority: boolean;
+}
+
+function loginOptions(http: HttpClient): Observable<Array<LoginOptionDto>> {
+  return http
+    .get('/login-options')
+    .pipe(map((dto: any) => dto as LoginOptionDto[]));
+}
+
 @Component({
-  selector: 'app-authentication',
+  selector: 'app-login',
   standalone: true,
   imports: [CommonModule, ReactiveFormsModule],
-  template: ` <span>
-      <select [formControl]="selectedLoginExperience">
+  template: `<span>
+      <select [formControl]="selectedLoginExperience" [disabled]="!isLoginEnabled">
         <option *ngFor="let le of loginExperiences">
           {{ loginExperienceLabel(le) }}
         </option>
       </select>
-      <button *ngIf="isLoginEnabled" (click)="login()">Login</button>
-      <button *ngIf="isAuthenticated" (click)="logout()">Logout</button>
+      <button (click)="login()"  [disabled]="!isLoginEnabled">Login</button>
     </span>
     <div
       class="modal-overlay"
@@ -33,7 +46,7 @@ enum LoginExperience {
         <iframe
           [src]="iframeSrc"
           frameborder="0"
-          (load)="iframeLoad($event)"
+          (load)="onIframeLoad($event)"
         ></iframe>
         <button class="close-button" (click)="isLoginModalDisplayed = false">
           Discard
@@ -68,7 +81,7 @@ enum LoginExperience {
     border: none;
   }`,
 })
-export class AuthenticationComponent {
+export class LoginComponent {
   isLoginModalDisplayed = false;
   iframeSrc?: SafeUrl;
   loginExperiences: LoginExperience[] = [];
@@ -79,11 +92,12 @@ export class AuthenticationComponent {
   private loginUri?: string;
 
   constructor(
+    http: HttpClient,
     private user: UserService,
     private router: Router,
     private sanitizer: DomSanitizer
   ) {
-    user.loginOptions.subscribe((opts) => {
+    loginOptions(http).subscribe((opts) => {
       if (opts.length) {
         this.loginUri = opts[0].loginUri;
         if (opts[0].isSameAuthority) {
@@ -103,10 +117,6 @@ export class AuthenticationComponent {
 
   get isAuthenticated(): boolean {
     return this.user.current.isAuthenticated;
-  }
-
-  loginExperienceLabel(le: LoginExperience): string {
-    return LoginExperience[le].replace('_', ' ').toLowerCase();
   }
 
   login() {
@@ -129,14 +139,14 @@ export class AuthenticationComponent {
     }
   }
 
-  iframeLoad(event: any) {
+  onIframeLoad(event: any) {
     if (!!event.currentTarget.src) {
       this.user.refresh();
       this.isLoginModalDisplayed = !this.user.current.isAuthenticated;
     }
   }
 
-  logout() {
-    this.user.logout();
+  loginExperienceLabel(le: LoginExperience) {
+    return LoginExperience[le].toLowerCase()
   }
 }

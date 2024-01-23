@@ -1,7 +1,7 @@
 import { Component } from '@angular/core';
 import { Subscription } from 'rxjs';
 import { NavigationComponent } from './navigation.component';
-import { UserService } from './user.service';
+import { UserService } from './auth/user.service';
 
 @Component({
   selector: 'app-home',
