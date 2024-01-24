@@ -1,9 +1,9 @@
 "use client";
 
+import { useUserContext } from "@/app/layout";
 import axios from "axios";
-import getConfig from "next/config";
 import { usePathname } from "next/navigation";
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { EventHandler, FormEvent, useEffect, useRef, useState } from "react";
 
 enum LoginExperience {
   DEFAULT,
@@ -20,8 +20,11 @@ async function getLoginOptions(): Promise<Array<LoginOptionDto>> {
   return response.data;
 }
 
-export default function LoginComponent() {
-  const publicRuntimeConfig = getConfig();
+interface LoginProperties {
+  onLogin: EventHandler<any>;
+}
+export default function Login({ onLogin }: LoginProperties) {
+  const user = useUserContext();
   const [loginUri, setLoginUri] = useState("");
   const [selectedLoginExperience, setSelectedLoginExperience] = useState(
     LoginExperience.DEFAULT
@@ -60,11 +63,15 @@ export default function LoginComponent() {
     if (!loginUri) {
       return;
     }
+    if (isLoginModalDisplayed) {
+      onLogin({});
+    }
     const formData = new FormData(event.currentTarget);
     const url = new URL(loginUri);
+
     url.searchParams.append(
       "post_login_success_uri",
-      `${publicRuntimeConfig.baseUri}${currentPath}`
+      `${process.env.NEXT_PUBLIC_BASE_URI}${currentPath}`
     );
     const loginUrl = url.toString();
     if (
@@ -88,6 +95,7 @@ export default function LoginComponent() {
     <form onSubmit={onSubmit}>
       <select
         value={selectedLoginExperience}
+        disabled={user.isAuthenticated}
         onChange={(e) => {
           setSelectedLoginExperience(
             e?.target?.value === "iframe"
@@ -101,8 +109,12 @@ export default function LoginComponent() {
         )}
         <option value={LoginExperience.DEFAULT}>default</option>
       </select>
-      <button type="submit">Login</button>
-      {isLoginModalDisplayed && <iframe ref={iframeRef}></iframe>}
+      <button disabled={user.isAuthenticated} type="submit">
+        Login
+      </button>
+      {isLoginModalDisplayed && !user.isAuthenticated && (
+        <iframe ref={iframeRef}></iframe>
+      )}
     </form>
   );
 }
