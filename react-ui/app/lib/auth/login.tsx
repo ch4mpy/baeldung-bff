@@ -35,17 +35,14 @@ export default function Login({ onLogin }: LoginProperties) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   useEffect(() => {
-    fetchLoginOptions();
-
     const iframe = iframeRef.current;
-    if (iframe) {
-      iframe.src = "";
-    }
     iframe?.addEventListener("load", onIframeLoad);
+
     return () => {
+      fetchLoginOptions();
       iframe?.removeEventListener("load", onIframeLoad);
     };
-  }, []);
+  });
 
   async function fetchLoginOptions() {
     const loginOpts = await getLoginOptions();
@@ -54,7 +51,7 @@ export default function Login({ onLogin }: LoginProperties) {
       setIframeLoginPossible(false);
     } else {
       setLoginUri(loginOpts[0].loginUri);
-      setIframeLoginPossible(loginOpts[0].isSameAuthority);
+      setIframeLoginPossible(true);
     }
   }
 
@@ -63,10 +60,6 @@ export default function Login({ onLogin }: LoginProperties) {
     if (!loginUri) {
       return;
     }
-    if (isLoginModalDisplayed) {
-      onLogin({});
-    }
-    const formData = new FormData(event.currentTarget);
     const url = new URL(loginUri);
 
     url.searchParams.append(
@@ -75,46 +68,70 @@ export default function Login({ onLogin }: LoginProperties) {
     );
     const loginUrl = url.toString();
     if (
-      formData.get("selectedLoginExperience")?.toString() === "iframe" &&
+      +selectedLoginExperience === +LoginExperience.IFRAME &&
       iframeRef.current
     ) {
-      iframeRef.current.src = loginUrl;
-      setIsLoginModalDisplayed(true);
+      const iframe = iframeRef.current;
+      if (iframe) {
+        iframe.src = loginUrl;
+        setIsLoginModalDisplayed(true);
+      }
     } else {
       window.location.href = loginUrl;
     }
   }
 
-  function onIframeLoad(event: any) {
-    if (!!event.currentTarget.src) {
-      setIsLoginModalDisplayed(true);
+  function onIframeLoad() {
+    if (isLoginModalDisplayed) {
+      onLogin({});
     }
   }
 
   return (
-    <form onSubmit={onSubmit}>
-      <select
-        value={selectedLoginExperience}
-        disabled={user.isAuthenticated}
-        onChange={(e) => {
-          setSelectedLoginExperience(
-            e?.target?.value === "iframe"
-              ? LoginExperience.IFRAME
-              : LoginExperience.DEFAULT
-          );
-        }}
+    <span>
+      <form onSubmit={onSubmit}>
+        <select
+          disabled={user.isAuthenticated}
+          onChange={(e) => {
+            setSelectedLoginExperience(
+              +e?.target?.value === +LoginExperience.IFRAME
+                ? LoginExperience.IFRAME
+                : LoginExperience.DEFAULT
+            );
+          }}
+        >
+          {isIframeLoginPossible && (
+            <option
+              value={LoginExperience.IFRAME}
+              hidden={!isIframeLoginPossible}
+            >
+              iframe
+            </option>
+          )}
+          <option value={LoginExperience.DEFAULT}>default</option>
+        </select>
+        <button disabled={user.isAuthenticated} type="submit">
+          Login
+        </button>
+      </form>
+      <div
+        className={
+          !user.isAuthenticated && isLoginModalDisplayed
+            ? "modal-overlay"
+            : "hidden"
+        }
+        onClick={() => setIsLoginModalDisplayed(false)}
       >
-        {isIframeLoginPossible && (
-          <option value={LoginExperience.IFRAME}>iframe</option>
-        )}
-        <option value={LoginExperience.DEFAULT}>default</option>
-      </select>
-      <button disabled={user.isAuthenticated} type="submit">
-        Login
-      </button>
-      {isLoginModalDisplayed && !user.isAuthenticated && (
-        <iframe ref={iframeRef}></iframe>
-      )}
-    </form>
+        <div></div>
+        <div className="modal">
+          <div className="flex">
+            <span className="ml-auto">
+              <button onClick={() => setIsLoginModalDisplayed(false)}>X</button>
+            </span>
+          </div>
+          <iframe ref={iframeRef}></iframe>
+        </div>
+      </div>
+    </span>
   );
 }
